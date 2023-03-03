@@ -154,6 +154,27 @@ ergm_GWDECAY <- list(
 
 GWDECAY <- ergm_GWDECAY
 
+#' @title Helper function for constructing `gw*` cutoff error messages
+#'
+#' @param cutoff the maximum value for the statistic of interest.
+#' @param term the name of the term.
+#' @param stat the name of the statistic of interest.
+#' @param arg the name of the term argument (if any) that controls the cutoff.
+#' @param opt the name of the term option (if any) that controls the cutoff.
+#'
+#' @return A character string with the error message.
+#' @keywords internal
+#' @export
+ergm_cutoff_message <- function(cutoff, term, stat, arg=NULL, opt=NULL){
+  msg <- sprintf("Term %s has encountered a network for which %s exceeded the cut-off setting of %d.", sQuote(term), stat, cutoff)
+  msg <- paste(msg,
+               if(!is.null(arg) && !is.null(opt)) sprintf("This can usually be remedied by increasing the value of the term argument %s or the corresponding term option %s.", sQuote(arg), sQuote(opt))
+               else if(!is.null(arg)) sprintf("This can usually be remedied by increasing the value of the term argument %s.", sQuote(arg))
+               else if(!is.null(opt)) sprintf("This can usually be remedied by increasing the value of the term option %s.", sQuote(opt))
+               else "Please see the term documentation for how it may be adjusted."
+               )
+}
+
 .spcache.aux <- function(type){
   type <- toupper(type)
   trim_env(as.formula(as.call(list(as.name('~'), as.call(list(as.name('.spcache.net'),type=if(type=='ITP')'OTP' else type))))))
@@ -212,19 +233,19 @@ decay_vs_fixed <- function(a, name, no_curved_attrarg=TRUE){
   }
 
   if(a$fixed){
-    if(is.null(a$decay)) ergm_Init_abort("Using ", sQuote('fixed=TRUE')," requires a decay parameter ", sQuote('decay'), ".")
+    if(!attr(a, "missing")["cutoff"]) ergm_Init_warn("When ", sQuote('fixed=TRUE'), " parameter ", sQuote('cutoff'), " has no effect.")
+    if(is.null(a$decay)) ergm_Init_abort("Using ", sQuote('fixed=TRUE'), " requires a decay parameter ", sQuote('decay'), ".")
   }else{
-    if(!is.null(a$decay)) ergm_Init_warn("Decay parameter ", sQuote('decay')," passed with ", sQuote('fixed=FALSE'), ". ", sQuote('decay')," will be ignored. To specify an initial value for ", sQuote('decay'),", use the ", sQuote('control.ergm()'), " parameter ", sQuote('init='), ".")
-
+    if(!is.null(a$decay)) ergm_Init_warn("When ", sQuote('fixed=FALSE'), " parameter ", sQuote('decay')," has no effect. To specify an initial value for ", sQuote('decay'),", use the ", sQuote('control.ergm()'), " parameter ", sQuote('init='), ".")
     if(no_curved_attrarg && !is.null(NVL(a$attrname,a$attr))) ergm_Init_abort("Using ", sQuote('fixed=FALSE'), " with an attribute is not implemented at this time. Use ", sQuote('fixed=TRUE'), ".")
   }
 }
 
-.degrange_impl <- function(deg, dir, bip, nw, arglist, ..., version){
+.degrange_impl <- function(deg, dir, bip, nw, arglist, ..., version=NULL, degname=deg){
   termname <- paste0(deg, "degrange")
   coefpre <- paste0(deg, "deg")
 
-  if(version <= as.package_version("3.9.4")){
+  if(EVL(version <= as.package_version("3.9.4"), FALSE)){
     a <- check.ErgmTerm(nw, arglist, directed=dir, bipartite=bip,
                         varnames = c("from", "to", "by", "homophily", "levels"),
                         vartypes = c("numeric", "numeric", "character", "logical", "character,numeric,logical"),
@@ -276,7 +297,7 @@ decay_vs_fixed <- function(a, name, no_curved_attrarg=TRUE){
     coef.names <- ifelse(to>=network.size(nw)+1,
                          paste(coefpre, from,"+",sep=""),
                          paste(coefpre, from,"to",to,sep=""))
-    name <- paste0(deg, "degrange")
+    name <- paste0(degname, "degrange")
     inputs <- c(rbind(from,to))
   } else if (homophily) {
     if(length(from)==0){return(NULL)}
@@ -284,7 +305,7 @@ decay_vs_fixed <- function(a, name, no_curved_attrarg=TRUE){
     coef.names <- ifelse(to>=network.size(nw)+1,
                          paste(coefpre, from,"+", ".homophily.",attrname,sep=""),
                          paste(coefpre, from,"to",to, ".homophily.",attrname,sep=""))
-    name <- paste0(deg, "degrange_w_homophily")
+    name <- paste0(degname, "degrange_w_homophily")
     inputs <- c(rbind(from,to), nodecov)
   } else {
     if(ncol(du)==0) {return(NULL)}
@@ -293,7 +314,7 @@ decay_vs_fixed <- function(a, name, no_curved_attrarg=TRUE){
     coef.names <- ifelse(du[2,]>=network.size(nw)+1,
                          paste(coefpre, du[1,],"+.", attrname, u[du[3,]],sep=""),
                          paste(coefpre, du[1,],"to",du[2,],".",attrname, u[du[3,]],sep=""))
-    name <- paste0(deg, "degrange_by_attr")
+    name <- paste0(degname, "degrange_by_attr")
     inputs <- c(as.vector(du), nodecov)
   }
 
@@ -301,8 +322,8 @@ decay_vs_fixed <- function(a, name, no_curved_attrarg=TRUE){
 }
 
 
-.degree_impl <- function(deg, dir, bip, nw, arglist, ..., version){
-  if(version <= as.package_version("3.9.4")){
+.degree_impl <- function(deg, dir, bip, nw, arglist, ..., version=NULL, degname=deg){
+  if(EVL(version <= as.package_version("3.9.4"), FALSE)){
     a <- check.ErgmTerm(nw, arglist, directed=dir, bipartite=bip,
                         varnames = c("d", "by", "homophily", "levels"),
                         vartypes = c("numeric", "character", "logical", "character,numeric,logical"),
@@ -344,26 +365,86 @@ decay_vs_fixed <- function(a, name, no_curved_attrarg=TRUE){
   if(is.null(byarg)) {
     if(length(d)==0){return(NULL)}
     coef.names <- paste0(deg, "degree", d)
-    name <- paste0(deg, "degree")
+    name <- paste0(degname, "degree")
     inputs <- c(d)
   } else if (homophily) {
     if(length(d)==0){return(NULL)}
     # See comment in d_degree_w_homophily function
     coef.names <- paste0(deg, "deg", d, ".homophily.", attrname)
-    name <- paste0(deg, "degree_w_homophily")
+    name <- paste0(degname, "degree_w_homophily")
     inputs <- c(d, nodecov)
   } else {
     if(ncol(du)==0) {return(NULL)}
     #  No covariates here, so "ParamsBeforeCov" unnecessary
     # See comment in d_degree_by_attr function
     coef.names <- paste0(deg, "deg", du[1,], ".", attrname,u[du[2,]])
-    name <- paste0(deg, "degree_by_attr")
+    name <- paste0(degname, "degree_by_attr")
     inputs <- c(as.vector(du), nodecov)
   }
 
   list(name = name, coef.names = coef.names, inputs = inputs, emptynwstats = emptynwstats, minval=0, maxval=network.size(nw), dependence=TRUE,
     minval = 0, maxval=network.size(nw), conflicts.constraints=paste0(deg, "degreedist"))
 }
+
+
+.gwdegree_impl <-function(deg, dir, bip, dmax, smax, ddesc, nw, arglist, ..., gw.cutoff, version=NULL, degname=deg) {
+  if(EVL(version <= as.package_version("3.9.4"), FALSE)){
+    ### Check the network and arguments to make sure they are appropriate.
+    a <- check.ErgmTerm(nw, arglist, directed=dir, bipartite=bip,
+    # default for 'fixed' should be made 'FALSE' when the function can handle it!
+                        varnames = c("decay", "fixed", "attrname","cutoff", "levels"),
+                        vartypes = c("numeric", "logical", "character", "numeric", "character,numeric,logical"),
+                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
+                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
+    attrarg <- a$attrname
+    levels <- if(!is.null(a$levels)) I(a$levels) else NULL
+  }else{
+    ### Check the network and arguments to make sure they are appropriate.
+    a <- check.ErgmTerm(nw, arglist, directed=dir, bipartite=bip,
+    # default for 'fixed' should be made 'FALSE' when the function can handle it!
+                        varnames = c("decay", "fixed", "attr","cutoff", "levels"),
+                        vartypes = c("numeric", "logical", ERGM_VATTR_SPEC,"numeric", ERGM_LEVELS_SPEC),
+                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
+                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
+    attrarg <- a$attr
+    levels <- a$levels
+  }
+
+  termname <- sprintf('gw%sdegree', deg)
+
+  ### Process the arguments
+  decay_vs_fixed(a, sprintf('gw%sdegree', deg))
+  decay<-a$decay; fixed<-a$fixed
+  md <- min(cutoff<-a$cutoff, dmax)
+  if(!fixed){# This is a curved exponential family model
+    if(md==0){return(NULL)}
+    c(list(minval=0, maxval=smax, dependence=TRUE, name=paste0(degname, "degdist"), coef.names=sprintf("%s#%d", termname, seq_len(md)),
+           cutoff.message = ergm_cutoff_message(md, termname, paste0(ddesc, "degree of some node"), "cutoff", "gw.cutoff"),
+           conflicts.constraints=paste0(deg,"degreedist"), params=setNames(list(NULL,decay), c(termname, paste0(termname,".decay")))), GWDECAY)
+  } else {
+    if(!is.null(attrarg)) {
+      nodecov <- if(NVL(bip, FALSE)) ergm_get_vattr(attrarg, nw, bip = deg) else ergm_get_vattr(attrarg, nw)
+      attrname <- attr(nodecov, "name")
+      u <- ergm_attr_levels(levels, nodecov, nw, levels = sort(unique(nodecov)))
+      nodecov <- match(nodecov,u,nomatch=length(u)+1) # Recode to numeric
+      # Combine degree and u into 2xk matrix, where k=length(d)*length(u)
+      lu <- length(u)
+      du <- rbind(rep(seq_len(md),lu), rep(1:lu, rep(md, lu)))
+      if(nrow(du)==0) {return(NULL)}
+     #  No covariates here, so "ParamsBeforeCov" unnecessary
+     # See comment in c_*degree_by_attr functions
+      name <- sprintf("gw%sdegree_by_attr", degname)
+      coef.names <- sprintf("gw%sdeg%f.%s%s", deg, decay, attrname, u)
+      inputs <- c(decay, nodecov)
+    }else{
+      name <- sprintf("gw%sdegree", degname)
+      coef.names <- sprintf("gw%sdeg.fixed.%f", deg, decay)
+      inputs <- c(decay)
+    }
+    list(minval=0, maxval=smax, dependence=TRUE, name=name, coef.names=coef.names, inputs=inputs, conflicts.constraints=paste0(deg,"degreedist"))
+  }
+}
+
 
 #=======================InitErgmTerm functions:  A============================#
 
@@ -820,7 +901,7 @@ InitErgmTerm.b1concurrent<-function(nw, arglist, ..., version=packageVersion("er
 #' @concept bipartite
 #' @concept undirected
 InitErgmTerm.b1degrange<-function(nw, arglist, ..., version=packageVersion("ergm")) {
-  .degrange_impl("b1", NULL, TRUE, nw, arglist, ..., version=version)
+  .degrange_impl("b1", NULL, TRUE, nw, arglist, ..., version=version, degname="o")
 }
 
 ################################################################################
@@ -908,7 +989,7 @@ InitErgmTerm.b1cov<-function (nw, arglist, ..., version=packageVersion("ergm")) 
 #' @concept categorical nodal attribute
 #' @concept frequently-used
 InitErgmTerm.b1degree <- function(nw, arglist, ..., version=packageVersion("ergm")) {
-  .degree_impl("b1", NULL, TRUE, nw, arglist, ..., version=version)
+  .degree_impl("b1", NULL, TRUE, nw, arglist, ..., version=version, degname="o")
 }
 
 
@@ -932,29 +1013,10 @@ InitErgmTerm.b1degree <- function(nw, arglist, ..., version=packageVersion("ergm
 #'
 #' @concept bipartite
 #' @concept undirected
-InitErgmTerm.b1dsp<-function(nw, arglist, cache.sp=TRUE, ...) {
-  a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-                      varnames = c("d"),
-                      vartypes = c("numeric"),
-                      defaultvalues = list(NULL),
-                      required = c(TRUE))
-  d <- a$d
-  
-  if(length(d) == 0)
-    return(NULL)
-
-  emptynwstats <- rep(0, length(d))
-  nb1 <- get.network.attribute(nw, "bipartite")
-
-  type <- "OSP"
-  typecode <- 4 # OSP type
-  
-  # in an empty network, the number of b1 dyads with zero shared
-  # partners is just the number of b1 dyads, which is nb1*(nb1-1)/2
-  emptynwstats[d==0] <- nb1*(nb1-1)/2 
-  
-  list(name="ddspbwrap", coef.names=paste("b1dsp",d,sep=""), inputs=c(typecode, d), 
-       emptynwstats=emptynwstats, minval = 0, maxval = nb1*(nb1-1)/2, dependence = TRUE, auxiliaries=if(cache.sp) .spcache.aux(type) else NULL)
+InitErgmTerm.b1dsp <- function(nw, arglist, cache.sp=TRUE, ...){
+  .d_sp_impl("b1", nw, arglist, cache.sp,
+             function(d, nw, ...) replace(numeric(length(d)), d==0, (nw%n%"bipartite")*(nw%n%"bipartite"-1)/2),
+             ...)
 }
 
 
@@ -1490,7 +1552,7 @@ InitErgmTerm.b2cov<-function (nw, arglist, ..., version=packageVersion("ergm")) 
 #' @concept bipartite
 #' @concept undirected
 InitErgmTerm.b2degrange<-function(nw, arglist, ..., version=packageVersion("ergm")) {
-  .degrange_impl("b2", NULL, TRUE, nw, arglist, ..., version=version)
+  .degrange_impl("b2", NULL, TRUE, nw, arglist, ..., version=version, degname="i")
 }
 
 
@@ -1523,7 +1585,7 @@ InitErgmTerm.b2degrange<-function(nw, arglist, ..., version=packageVersion("ergm
 #' @concept categorical nodal attribute
 #' @concept frequently-used
 InitErgmTerm.b2degree <- function(nw, arglist, ..., version=packageVersion("ergm")) {
-  .degree_impl("b2", NULL, TRUE, nw, arglist, ..., version=version)
+  .degree_impl("b2", NULL, TRUE, nw, arglist, ..., version=version, degname="i")
 }
 
 ################################################################################
@@ -1545,29 +1607,10 @@ InitErgmTerm.b2degree <- function(nw, arglist, ..., version=packageVersion("ergm
 #'
 #' @concept bipartite
 #' @concept undirected
-InitErgmTerm.b2dsp<-function(nw, arglist, cache.sp=TRUE, ...) {
-  a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-                      varnames = c("d"),
-                      vartypes = c("numeric"),
-                      defaultvalues = list(NULL),
-                      required = c(TRUE))
-  d <- a$d
-  
-  if(length(d) == 0)
-    return(NULL)
-
-  emptynwstats <- rep(0, length(d))
-  nb2 <- network.size(nw) - get.network.attribute(nw, "bipartite")
-  
-  type <- "ISP"
-  typecode <- 5 # ISP type
-  
-  # in an empty network, the number of b2 dyads with zero shared
-  # partners is just the number of b2 dyads, which is nb2*(nb2-1)/2
-  emptynwstats[d==0] <- nb2*(nb2-1)/2 
-  
-  list(name="ddspbwrap", coef.names=paste("b2dsp",d,sep=""), inputs=c(typecode, d), 
-       emptynwstats=emptynwstats, minval = 0, maxval = nb2*(nb2-1)/2, dependence = TRUE, auxiliaries=if(cache.sp) .spcache.aux(type) else NULL)
+InitErgmTerm.b2dsp <- function(nw, arglist, cache.sp=TRUE, ...){
+  .d_sp_impl("b2", nw, arglist, cache.sp,
+             function(d, nw, ...) replace(numeric(length(d)), d==0, (network.size(nw)-nw%n%"bipartite")*(network.size(nw)-nw%n%"bipartite"-1)/2),
+             ...)
 }
 
 ################################################################################
@@ -2477,62 +2520,6 @@ InitErgmTerm.diff <- function(nw, arglist, ..., version=packageVersion("ergm")) 
 
 ################################################################################
 
-#' @templateVar name dsp
-#' @title Dyadwise shared partners
-#' @description This term adds one
-#'   network statistic to the model for each element in `d` ; the \eqn{i} th
-#'   such statistic equals the number of dyads in the network with exactly
-#'   `d[i]` shared partners. This term can be used with directed and
-#'   undirected networks.
-#'   
-#' @usage
-#' # binary: dsp(d)
-#'
-#' @param d a vector of distinct integers
-#'
-#' @template ergmTerm-cache-sp
-#' @template ergmTerm-general
-#'
-#' @templateVar fn dsp
-#' @templateVar kind (directed) dyad `(i,j)`
-#' @templateVar see ddsp
-#' @template ergmTerm-sp-to-dsp
-#'
-#' @concept directed
-#' @concept undirected
-InitErgmTerm.dsp<-function(nw, arglist, cache.sp=TRUE, ...) {
-  a <- check.ErgmTerm(nw, arglist,
-                      varnames = c("d"),
-                      vartypes = c("numeric"),
-                      defaultvalues = list(NULL),
-                      required = c(TRUE))
-  d <- a$d
-  if (any(d==0)) {
-    emptynwstats <- rep(0, length(d))
-    if(is.bipartite(nw)){
-      nb1 <- get.network.attribute(nw, "bipartite")
-      nb2 <- network.size(nw) - nb1
-      emptynwstats[d==0] <- nb1*(nb1-1)/2 + nb2*(nb2-1)/2
-    }else{
-      emptynwstats[d==0] <- network.dyadcount(nw,FALSE)
-    }
-  }else{
-    emptynwstats <- NULL
-  }
-  ld<-length(d)
-  if(ld==0){return(NULL)}
-  if(is.directed(nw)){dname <- "tdsp"}else{dname <- "dsp"}
-  if (!is.null(emptynwstats)){
-    list(name=dname, coef.names=paste("dsp",d,sep=""),
-         inputs=c(d), emptynwstats=emptynwstats, minval = 0, auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-  }else{
-    list(name=dname, coef.names=paste("dsp",d,sep=""),inputs=c(d), minval = 0, auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-  }
-}
-
-
-################################################################################
-
 #' @templateVar name dyadcov
 #' @title Dyadic covariate
 #' @description This term adds three statistics to the model, each equal to the sum of the
@@ -2669,48 +2656,6 @@ InitErgmTerm.edges<-function(nw, arglist, ...) {
 }
 
 
-
-################################################################################
-
-#' @templateVar name esp
-#' @title Edgewise shared partners
-#' @description This is just like the `dsp` term, except this term adds one network
-#'   statistic to the model for each element in `d` where the \eqn{i} th such
-#'   statistic equals the number of edges (rather than dyads) in the
-#'   network with exactly `d[i]` shared partners. This term can be used with
-#'   directed and undirected networks.
-#'   
-#' @usage
-#' # binary: esp(d)
-#'
-#' @param d a vector of distinct integers
-#'
-#' @template ergmTerm-cache-sp
-#' @template ergmTerm-general
-#'
-#' @templateVar fn esp
-#' @templateVar kind (directed) edge `i -> j`
-#' @templateVar see desp
-#' @template ergmTerm-sp-to-dsp
-#'
-#' @concept directed
-#' @concept undirected
-InitErgmTerm.esp<-function(nw, arglist, cache.sp=TRUE, ...) {
-  a <- check.ErgmTerm(nw, arglist,
-                      varnames = c("d"),
-                      vartypes = c("numeric"),
-                      defaultvalues = list(NULL),
-                      required = c(TRUE))
-  d<-a$d
-  ld<-length(d)
-  if(ld==0){return(NULL)}
-  if(is.directed(nw)){dname <- "tesp"}else{dname <- "esp"}
-
-  list(name=dname, coef.names=paste("esp",d,sep=""), inputs=c(d), minval=0, auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-}
-
-
-
 #=======================InitErgmTerm functions:  G============================#
 
 ################################################################################
@@ -2742,62 +2687,8 @@ InitErgmTerm.esp<-function(nw, arglist, cache.sp=TRUE, ...) {
 #' @concept undirected
 #' @concept curved
 InitErgmTerm.gwb1degree<-function(nw, arglist, gw.cutoff=30, ..., version=packageVersion("ergm")) {
-  if(version <= as.package_version("3.9.4")){
-    ### Check the network and arguments to make sure they are appropriate.
-    a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-    # default for 'fixed' should be made 'FALSE' when the function can handle it!                    
-                        varnames = c("decay", "fixed", "attrname","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", "character","numeric", "character,numeric,logical"),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attrname
-    levels <- if(!is.null(a$levels)) I(a$levels) else NULL                        
-  }else{
-    ### Check the network and arguments to make sure they are appropriate.
-    a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-    # default for 'fixed' should be made 'FALSE' when the function can handle it!                    
-                        varnames = c("decay", "fixed", "attr","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", ERGM_VATTR_SPEC,"numeric", ERGM_LEVELS_SPEC),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attr
-    levels <- a$levels
-  }
-  ### Process the arguments
-  decay_vs_fixed(a, 'gwb1degree')
-  decay<-a$decay; fixed<-a$fixed
-  cutoff<-a$cutoff
-  nb1 <- get.network.attribute(nw,"bipartite")
-  maxesp <- min(cutoff, network.size(nw)-nb1)
-
-  d <- 1:maxesp
-  if(!fixed){# This is a curved exponential family model
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    c(list(minval=0, maxval=network.size(nw), dependence=TRUE, name="b1degree", coef.names=paste("gwb1degree#",d,sep=""), inputs=c(d),
-           conflicts.constraints="b1degreedist", params=list(gwb1degree=NULL,gwb1degree.decay=decay)), GWDECAY)
-  } else {
-    if(!is.null(attrarg)) {
-      nodecov <- ergm_get_vattr(attrarg, nw, bip="b1")
-      attrname <- attr(nodecov, "name")
-      u <- ergm_attr_levels(levels, nodecov, nw, levels = sort(unique(nodecov)))
-      nodecov <- match(nodecov,u,nomatch=length(u)+1) # Recode to numeric
-      # Combine degree and u into 2xk matrix, where k=length(d)*length(u)
-      lu <- length(u)
-      du <- rbind(rep(d,lu), rep(1:lu, rep(length(d), lu)))
-      if(nrow(du)==0) {return(NULL)}
-      #  No covariates here, so "ParamsBeforeCov" unnecessary
-      # See comment in d_gwb1degree_by_attr function
-      name <- "gwb1degree_by_attr"
-      coef.names <- paste("gwb1deg", decay, ".",attrname, u, sep="")
-      inputs <- c(decay, nodecov)
-    }else{
-      name <- "gwb1degree"
-      coef.names <- paste("gwb1deg.fixed.",decay,sep="")
-      inputs <- c(decay)
-    }
-    list(minval=0, maxval=network.size(nw), dependence=TRUE, name=name, coef.names=coef.names, inputs=inputs, conflicts.constraints="b1degreedist")
-  }
+  bip <- nw%n%"bipartite"
+  .gwdegree_impl("b1", FALSE, TRUE, network.size(nw)-bip, bip, "mode-1 ", nw, arglist, ..., gw.cutoff=gw.cutoff, version=version, degname="o")
 }
 
 
@@ -2824,38 +2715,7 @@ InitErgmTerm.gwb1degree<-function(nw, arglist, gw.cutoff=30, ..., version=packag
 #' @concept undirected
 #' @concept curved
 InitErgmTerm.gwb1dsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
-  a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-                      varnames = c("decay","fixed","cutoff"),
-                      vartypes = c("numeric","logical","numeric"),
-                      defaultvalues = list(NULL, FALSE, gw.cutoff),
-                      required = c(FALSE, FALSE, FALSE))
-  decay<-a$decay
-  fixed<-a$fixed
-  cutoff<-a$cutoff
-  decay=decay[1] # Not sure why anyone would enter a vector here, but...
-
-  type <- "OSP"
-  typecode <- 4 # OSP type
-  
-  basenam <- "gwb1dsp"
-  
-  maxdsp <- min(cutoff, network.size(nw) - nw %n% "bipartite")
-
-  if(!fixed){ # This is a curved exponential family model
-    d <- 1:maxdsp
-
-    if(length(d) == 0)
-      return(NULL)
-    
-    # first name must match `basenam`
-    params<-list(gwb1dsp=NULL,gwb1dsp.decay=decay)
-    
-    c(list(name="ddspbwrap", coef.names=paste("b1dsp#",d,sep=""), 
-         inputs=c(if(!cache.sp) -1,typecode,d), params=params, auxiliaries=if(cache.sp) .spcache.aux(type) else NULL), GWDECAY)
-  }else{
-    coef.names <- paste("gwb1dsp.fixed",decay,sep=".")
-    list(name="dgwdspbwrap", coef.names=coef.names, inputs=c(if(!cache.sp) -1,decay,typecode,maxdsp), auxiliaries=if(cache.sp) .spcache.aux(type) else NULL)
-  }
+  .dgw_sp_impl("b1", nw, arglist, cache.sp, gw.cutoff=gw.cutoff, ...)
 }
 
 ################################################################################
@@ -2885,63 +2745,7 @@ InitErgmTerm.gwb1dsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
 #' @concept undirected
 #' @concept curved
 InitErgmTerm.gwb2degree<-function(nw, arglist, gw.cutoff=30, ..., version=packageVersion("ergm")) {
-  if(version <= as.package_version("3.9.4")){
-    ### Check the network and arguments to make sure they are appropriate.
-    a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-    # default for 'fixed' should be made 'FALSE' when the function can handle it!                    
-                        varnames = c("decay", "fixed", "attrname","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", "character", "numeric", "character,numeric,logical"),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attrname
-    levels <- if(!is.null(a$levels)) I(a$levels) else NULL                        
-  }else{
-    ### Check the network and arguments to make sure they are appropriate.
-    a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-    # default for 'fixed' should be made 'FALSE' when the function can handle it!                    
-                        varnames = c("decay", "fixed", "attr","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", ERGM_VATTR_SPEC,"numeric", ERGM_LEVELS_SPEC),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attr
-    levels <- a$levels
-  }
-  
-  ### Process the arguments  
-  decay_vs_fixed(a, 'gwb2degree')
-  decay<-a$decay; fixed<-a$fixed
-  cutoff<-a$cutoff
-  nb1 <- get.network.attribute(nw,"bipartite")
-# d <- 1:nb1
-  maxesp <- min(cutoff,nb1)
-  d <- 1:maxesp
-  if(!fixed){# This is a curved exponential family model
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    c(list(minval=0, maxval=network.size(nw), dependence=TRUE, name="b2degree", coef.names=paste("gwb2degree#",d,sep=""), inputs=c(d),
-           conflicts.constraints="b2degreedist", params=list(gwb2degree=NULL,gwb2degree.decay=decay)), GWDECAY)
-  } else {
-    if(!is.null(attrarg)) {
-      nodecov <- ergm_get_vattr(attrarg, nw, bip="b2")
-      attrname <- attr(nodecov, "name")
-      u <- ergm_attr_levels(levels, nodecov, nw, levels = sort(unique(nodecov)))
-      nodecov <- match(nodecov,u,nomatch=length(u)+1) # Recode to numeric
-      # Combine degree and u into 2xk matrix, where k=length(d)*length(u)
-      lu <- length(u)
-      du <- rbind(rep(d,lu), rep(1:lu, rep(length(d), lu)))
-      if(nrow(du)==0) {return(NULL)}
-     #  No covariates here, so "ParamsBeforeCov" unnecessary
-     # See comment in d_gwb2degree_by_attr function
-      name <- "gwb2degree_by_attr"
-      coef.names <- paste("gwb2deg", decay, ".", attrname, u, sep="")
-      inputs <- c(decay, nodecov)
-    }else{
-      name <- "gwb2degree"
-      coef.names <- paste("gwb2deg.fixed.",decay,sep="")
-      inputs <- c(decay)
-    }
-    list(minval=0, maxval=network.size(nw), dependence=TRUE, name=name, coef.names=coef.names, inputs=inputs, conflicts.constraints="b2degreedist")
-  }
+  .gwdegree_impl("b2", FALSE, TRUE, bip<-nw%n%"bipartite", network.size(nw)-bip, "mode-2 ", nw, arglist, ..., gw.cutoff=gw.cutoff, version=version, degname="i")
 }
 
 ################################################################################
@@ -2967,38 +2771,7 @@ InitErgmTerm.gwb2degree<-function(nw, arglist, gw.cutoff=30, ..., version=packag
 #' @concept undirected
 #' @concept curved
 InitErgmTerm.gwb2dsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
-  a <- check.ErgmTerm(nw, arglist, directed=FALSE, bipartite=TRUE,
-                      varnames = c("decay","fixed","cutoff"),
-                      vartypes = c("numeric","logical","numeric"),
-                      defaultvalues = list(NULL, FALSE, gw.cutoff),
-                      required = c(FALSE, FALSE, FALSE))
-  decay<-a$decay
-  fixed<-a$fixed
-  cutoff<-a$cutoff
-  decay=decay[1] # Not sure why anyone would enter a vector here, but...
-
-  type <- "ISP"
-  typecode <- 5 # ISP type
-  
-  basenam <- "gwb2dsp"
-  
-  maxdsp <- min(cutoff, nw %n% "bipartite")
-
-  if(!fixed){ # This is a curved exponential family model
-    d <- 1:maxdsp
-
-    if(length(d) == 0)
-      return(NULL)
-    
-    # first name must match `basenam`
-    params<-list(gwb2dsp=NULL,gwb2dsp.decay=decay)
-    
-    c(list(name="ddspbwrap", coef.names=paste("b2dsp#",d,sep=""), 
-         inputs=c(if(!cache.sp) -1,typecode,d), params=params, auxiliaries=if(cache.sp) .spcache.aux(type) else NULL), GWDECAY)
-  }else{
-    coef.names <- paste("gwb2dsp.fixed",decay,sep=".")    
-    list(name="dgwdspbwrap", coef.names=coef.names, inputs=c(if(!cache.sp) -1,decay,typecode,maxdsp), auxiliaries=if(cache.sp) .spcache.aux(type) else NULL)
-  }
+  .dgw_sp_impl("b2", nw, arglist, cache.sp, gw.cutoff=gw.cutoff, ...)
 }
 
 ################################################################################
@@ -3025,177 +2798,8 @@ InitErgmTerm.gwb2dsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
 #' @concept curved
 #' @concept frequently-used
 InitErgmTerm.gwdegree<-function(nw, arglist, gw.cutoff=30, ..., version=packageVersion("ergm")) {
-  if(version <= as.package_version("3.9.4")){
-    a <- check.ErgmTerm(nw, arglist, directed=FALSE,
-                        varnames = c("decay", "fixed", "attrname","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", "character", "numeric", "character,numeric,logical"),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attrname
-    levels <- if(!is.null(a$levels)) I(a$levels) else NULL                                                
-  }else{
-    a <- check.ErgmTerm(nw, arglist, directed=FALSE,
-                        varnames = c("decay", "fixed", "attr","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", ERGM_VATTR_SPEC, "numeric", ERGM_LEVELS_SPEC),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attr
-    levels <- a$levels  
-  }
-
-  decay_vs_fixed(a, 'gwdegree')
-  decay<-a$decay; fixed<-a$fixed  
-  cutoff<-a$cutoff
-   maxesp <- min(cutoff,network.size(nw)-1)
-  d <- 1:maxesp
-  if(!fixed){ # This is a curved exponential family model
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    c(list(minval=0, maxval=network.size(nw), dependence=TRUE, name="degree", coef.names=paste("gwdegree#",d,sep=""), inputs=c(d),
-           conflicts.constraints="degreedist", params=list(gwdegree=NULL,gwdegree.decay=decay)), GWDECAY)
-  } else {
-    if(!is.null(attrarg)) {
-      nodecov <- ergm_get_vattr(attrarg, nw)
-      attrname <- attr(nodecov, "name")
-      u <- ergm_attr_levels(levels, nodecov, nw, levels = sort(unique(nodecov)))
-      nodecov <- match(nodecov,u,nomatch=length(u)+1) # Recode to numeric
-      # Combine degree and u into 2xk matrix, where k=length(d)*length(u)
-      lu <- length(u)
-      du <- rbind(rep(d,lu), rep(1:lu, rep(length(d), lu)))
-      if(nrow(du)==0) {return(NULL)}
-      #  No covariates here, so "ParamsBeforeCov" unnecessary
-      name <- "gwdegree_by_attr"
-      coef.names <- paste("gwdeg", decay, ".", attrname, u, sep="")
-      inputs <- c(decay, nodecov)
-    }else{
-      name <- "gwdegree"
-      coef.names <- paste("gwdeg.fixed.",decay,sep="")
-      inputs <- c(decay)
-    }
-    list(minval=0, maxval=network.size(nw), dependence=TRUE, name=name, coef.names=coef.names, inputs=inputs, conflicts.constraints="degreedist")
-  }
+  .gwdegree_impl("", FALSE, FALSE, network.size(nw)-1, network.size(nw), "", nw, arglist, ..., gw.cutoff=gw.cutoff, version=version)
 }
-
-
-################################################################################
-
-#' @templateVar name gwdsp
-#' @title Geometrically weighted dyadwise shared partner distribution
-#' @description This term adds one network statistic to the model equal to the geometrically
-#'   weighted dyadwise shared partner distribution with decay parameter
-#'   `decay` parameter, which should be non-negative. 
-#'   This term can be used with directed and undirected networks.
-#'   
-#' @usage
-#' # binary: gwdsp(decay, fixed=FALSE, cutoff=30)
-#'
-#' @templateVar multiplicand shared partner or directed 2-path count
-#' @template ergmTerm-gw-decay-fixed
-#' @templateVar underlying DSP
-#' @template ergmTerm-gw-cutoff
-#'
-#' @template ergmTerm-cache-sp
-#' @template ergmTerm-general
-#'
-#' @templateVar fn gwdsp
-#' @templateVar kind (directed) dyad `(i,j)`
-#' @templateVar see dgwdsp
-#' @template ergmTerm-sp-to-dsp
-#'
-#' @template ergmTerm-gw-alpha-to-decay
-#'
-#' @concept directed
-#' @concept undirected
-#' @concept curved
-InitErgmTerm.gwdsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
-  a <- check.ErgmTerm(nw, arglist,
-                      varnames = c("decay","fixed","cutoff","alpha"),
-                      vartypes = c("numeric","logical","numeric","numeric"),
-                      defaultvalues = list(NULL, FALSE, gw.cutoff, NULL),
-                      required = c(FALSE, FALSE, FALSE, FALSE))
-  decay_vs_fixed(a, 'gwdsp')
-  decay<-a$decay;fixed<-a$fixed
-  cutoff<-a$cutoff
-  if(!fixed){ # This is a curved exponential family model
-    maxesp <- min(cutoff,network.size(nw)-2)
-    d <- 1:maxesp
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    if(is.directed(nw)){dname <- "tdsp"}else{dname <- "dsp"}
-    c(list(name=dname, coef.names=paste("gwdsp#",d,sep=""), 
-           inputs=c(d), params=list(gwdsp=NULL,gwdsp.decay=decay), auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL),
-      GWDECAY)
-  }else{
-    if (!fixed)
-      coef.names <- "gwdsp"
-    else  # fixed == TRUE
-      coef.names <- paste("gwdsp.fixed.",decay,sep="")
-  if(is.directed(nw)){dname <- "gwtdsp"}else{dname <- "gwdsp"}
-  list(name=dname, coef.names=coef.names, inputs=c(decay), auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-  }
-}
-
-
-
-################################################################################
-
-#' @templateVar name gwesp
-#' @title Geometrically weighted edgewise shared partner distribution
-#' @description This term is just like `gwdsp` except it adds a statistic equal to the
-#'   geometrically weighted edgewise (not dyadwise) shared partner
-#'   distribution with decay parameter
-#'   `decay` parameter, which should be non-negative. This term can be used with directed and
-#'   undirected networks.
-#'   
-#' @usage
-#' # binary: gwesp(decay, fixed=FALSE, cutoff=30)
-#'
-#' @templateVar multiplicand shared partner or directed 2-path count
-#' @template ergmTerm-gw-decay-fixed
-#' @templateVar underlying ESP
-#' @template ergmTerm-gw-cutoff
-#'
-#' @template ergmTerm-cache-sp
-#' @template ergmTerm-general
-#'
-#' @templateVar fn gwesp
-#' @templateVar kind (directed) edge `i -> j`
-#' @templateVar see dgwesp
-#' @template ergmTerm-sp-to-dsp
-#'
-#' @template ergmTerm-gw-alpha-to-decay
-#'
-#' @concept frequently-used
-#' @concept directed
-#' @concept undirected
-#' @concept curved
-InitErgmTerm.gwesp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
-  a <- check.ErgmTerm(nw, arglist,
-                      varnames = c("decay","fixed","cutoff", "alpha"),
-                      vartypes = c("numeric","logical","numeric", "numeric"),
-                      defaultvalues = list(NULL, FALSE, gw.cutoff, NULL),
-                      required = c(FALSE, FALSE, FALSE, FALSE))
-  decay_vs_fixed(a, 'gwesp')
-  decay<-a$decay;fixed<-a$fixed
-  cutoff<-a$cutoff
-  decay=decay[1] # Not sure why anyone would enter a vector here, but...
-  if(!fixed){ # This is a curved exponential family model
-    maxesp <- min(cutoff,network.size(nw)-2)
-    d <- 1:maxesp
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    if(is.directed(nw)){dname <- "tesp"}else{dname <- "esp"}
-    c(list(name=dname, coef.names=paste("esp#",d,sep=""), 
-         inputs=c(d), params=list(gwesp=NULL,gwesp.decay=decay), auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL),
-      GWDECAY)
-  }else{
-    coef.names <- paste("gwesp.fixed.",decay,sep="")
-    if(is.directed(nw)){dname <- "gwtesp"}else{dname <- "gwesp"}
-    list(name=dname, coef.names=coef.names, inputs=c(decay), auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-  }
-}
-
-
 
 ################################################################################
 
@@ -3222,115 +2826,8 @@ InitErgmTerm.gwesp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
 #' @concept directed
 #' @concept curved
 InitErgmTerm.gwidegree<-function(nw, arglist, gw.cutoff=30, ..., version=packageVersion("ergm")) {
-  if(version <= as.package_version("3.9.4")){
-    a <- check.ErgmTerm(nw, arglist, directed=TRUE,
-                        varnames = c("decay", "fixed", "attrname","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", "character", "numeric", "character,numeric,logical"),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attrname
-    levels <- if(!is.null(a$levels)) I(a$levels) else NULL                                                
-  }else{
-    a <- check.ErgmTerm(nw, arglist, directed=TRUE,
-                        varnames = c("decay", "fixed", "attr","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", ERGM_VATTR_SPEC, "numeric", ERGM_LEVELS_SPEC),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attr
-    levels <- a$levels  
-  }
-  decay_vs_fixed(a, 'gwidegree')
-  decay<-a$decay; fixed<-a$fixed  
-  cutoff<-a$cutoff
-  maxesp <- min(cutoff,network.size(nw)-1)
-  d <- 1:maxesp
-  if(!fixed){ # This is a curved exponential family model
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    c(list(minval=0, maxval=network.size(nw), dependence=TRUE, name="idegree", coef.names=paste("gwidegree#",d,sep=""), inputs=c(d),
-           conflicts.constraints="idegreedist", params=list(gwidegree=NULL,gwidegree.decay=decay)), GWDECAY)
-  } else { 
-    if(!is.null(attrarg)) {
-      nodecov <- ergm_get_vattr(attrarg, nw)
-      attrname <- attr(nodecov, "name")
-      u <- ergm_attr_levels(levels, nodecov, nw, levels = sort(unique(nodecov)))
-      nodecov <- match(nodecov,u,nomatch=length(u)+1) # Recode to numeric
-      # Combine degree and u into 2xk matrix, where k=length(d)*length(u)
-      lu <- length(u)
-      du <- rbind(rep(d,lu), rep(1:lu, rep(length(d), lu)))
-      if(nrow(du)==0) {return(NULL)}
-      #  No covariates here, so "ParamsBeforeCov" unnecessary
-      name <- "gwidegree_by_attr"
-      coef.names <- paste("gwideg", decay, ".", attrname, u, sep="")
-      inputs <- c(decay, nodecov)
-    }else{
-      name <- "gwidegree"
-      coef.names <- paste("gwideg.fixed.",decay,sep="")
-      inputs <- c(decay)
-    }
-    list(minval=0, maxval=network.size(nw), dependence=TRUE, name=name, coef.names=coef.names, inputs=inputs, conflicts.constraints="idegreedist")
-  }
+  .gwdegree_impl("i", TRUE, FALSE, network.size(nw)-1, network.size(nw), "in-", nw, arglist, ..., gw.cutoff=gw.cutoff, version=version)
 }
-
-
-################################################################################
-
-#' @templateVar name gwnsp
-#' @title Geometrically weighted nonedgewise shared partner distribution
-#' @description This term is just like
-#'   `gwesp` and `gwdsp` except it adds a statistic equal to
-#'   the geometrically weighted *nonedgewise* (that is, over dyads
-#'   that do not have an edge) shared partner distribution with weight
-#'   parameter `decay` parameter, which should be non-negative. This term can be used with
-#'   directed and undirected networks.
-#'   
-#' @usage
-#' # binary: gwnsp(decay, fixed=FALSE, cutoff=30)
-#'
-#' @templateVar multiplicand shared partner or directed 2-path count
-#' @template ergmTerm-gw-decay-fixed
-#' @templateVar underlying NSP
-#' @template ergmTerm-gw-cutoff
-#'
-#' @template ergmTerm-cache-sp
-#' @template ergmTerm-general
-#'
-#' @templateVar fn gwnsp
-#' @templateVar kind (directed) non-edge `(i,j)`
-#' @templateVar see dgwnsp
-#' @template ergmTerm-sp-to-dsp
-#'
-#' @template ergmTerm-gw-alpha-to-decay
-#'
-#' @concept directed
-#' @concept undirected
-#' @concept curved
-InitErgmTerm.gwnsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
-  a <- check.ErgmTerm(nw, arglist,
-                      varnames = c("decay","fixed","cutoff", "alpha"),
-                      vartypes = c("numeric","logical","numeric", "numeric"),
-                      defaultvalues = list(NULL, FALSE, gw.cutoff, NULL),
-                      required = c(FALSE, FALSE, FALSE, FALSE))
-  decay_vs_fixed(a, 'gwnsp')
-  decay<-a$decay;fixed<-a$fixed
-  cutoff<-a$cutoff
-  decay=decay[1] # Not sure why anyone would enter a vector here, but...
-  if(!fixed){ # This is a curved exponential family model
-    maxesp <- min(cutoff,network.size(nw)-2)
-    d <- 1:maxesp
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    if(is.directed(nw)){dname <- "tnsp"}else{dname <- "nsp"}
-    c(list(name=dname, coef.names=paste("nsp#",d,sep=""),
-           inputs=c(d), params=list(gwnsp=NULL,gwnsp.decay=decay), auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL),
-      GWDECAY)
-  }else{
-    coef.names <- paste("gwnsp.fixed.",decay,sep="")
-    if(is.directed(nw)){dname <- "gwtnsp"}else{dname <- "gwnsp"}
-    list(name=dname, coef.names=coef.names, inputs=c(decay), auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)    
-  }
-}
-
 
 ################################################################################
 
@@ -3357,54 +2854,7 @@ InitErgmTerm.gwnsp<-function(nw, arglist, cache.sp=TRUE, gw.cutoff=30, ...) {
 #' @concept directed
 #' @concept curved
 InitErgmTerm.gwodegree<-function(nw, arglist, gw.cutoff=30, ..., version=packageVersion("ergm")) {
-  if(version <= as.package_version("3.9.4")){
-    a <- check.ErgmTerm(nw, arglist, directed=TRUE,
-                        varnames = c("decay", "fixed", "attrname","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", "character", "numeric", "character,numeric,logical"),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attrname
-    levels <- if(!is.null(a$levels)) I(a$levels) else NULL                                                
-  }else{
-    a <- check.ErgmTerm(nw, arglist, directed=TRUE,
-                        varnames = c("decay", "fixed", "attr","cutoff", "levels"),
-                        vartypes = c("numeric", "logical", ERGM_VATTR_SPEC, "numeric", ERGM_LEVELS_SPEC),
-                        defaultvalues = list(NULL, FALSE, NULL, gw.cutoff, NULL),
-                        required = c(FALSE, FALSE, FALSE, FALSE, FALSE))
-    attrarg <- a$attr
-    levels <- a$levels  
-  }
-  decay_vs_fixed(a, 'gwodegree')
-  decay<-a$decay; fixed<-a$fixed  
-  cutoff<-a$cutoff
-  maxesp <- min(cutoff,network.size(nw)-1)
-  d <- 1:maxesp
-  if(!fixed){ # This is a curved exponential family model
-    ld<-length(d)
-    if(ld==0){return(NULL)}
-    c(list(minval=0, maxval=network.size(nw), dependence=TRUE, name="odegree", coef.names=paste("gwodegree#",d,sep=""), inputs=c(d),
-           conflicts.constraints="odegreedist", params=list(gwodegree=NULL,gwodegree.decay=decay)), GWDECAY)
-  } else {
-    if(!is.null(attrarg)) {
-      nodecov <- ergm_get_vattr(attrarg, nw)
-      attrname <- attr(nodecov, "name")
-      u <- ergm_attr_levels(levels, nodecov, nw, levels = sort(unique(nodecov)))
-      nodecov <- match(nodecov,u,nomatch=length(u)+1) # Recode to numeric
-      # Combine degree and u into 2xk matrix, where k=length(d)*length(u)
-      lu <- length(u)
-      du <- rbind(rep(d,lu), rep(1:lu, rep(length(d), lu)))
-      if(nrow(du)==0) {return(NULL)}
-      #  No covariates here, so "ParamsBeforeCov" unnecessary
-      name <- "gwodegree_by_attr"
-      coef.names <- paste("gwodeg", decay, ".", attrname, u, sep="")
-      inputs <- c(decay, nodecov)
-    }else{
-      name <- "gwodegree"
-      coef.names <- paste("gwodeg.fixed.",decay,sep="")
-      inputs <- c(decay)
-    }
-    list(minval=0, maxval=network.size(nw), dependence=TRUE, name=name, coef.names=coef.names, inputs=inputs, conflicts.constraints="odegreedist")
-  }
+  .gwdegree_impl("o", TRUE, FALSE, network.size(nw)-1, network.size(nw), "out-", nw, arglist, ..., gw.cutoff=gw.cutoff, version=version)
 }
 
 
@@ -5068,67 +4518,6 @@ InitErgmTerm.nodeofactor<-function (nw, arglist, ..., version=packageVersion("er
        minval = 0
        )
 }
-
-################################################################################
-
-#' @templateVar name nsp
-#' @title Nonedgewise shared partners
-#' @description This is
-#'   just like the `dsp` and `esp` terms, except this term adds
-#'   one network statistic to the model for each element in `d`
-#'   where the \eqn{i} th such statistic equals the number of
-#'   non-edges (that is, dyads that do not have an edge) in the network
-#'   with exactly `d[i]` shared partners. This term can be used with
-#'   directed and undirected networks.
-#'   
-#' @usage
-#' # binary: nsp(d)
-#'
-#' @param d a vector of distinct integers
-#'
-#' @template ergmTerm-cache-sp
-#' @template ergmTerm-general
-#'
-#' @templateVar fn nsp
-#' @templateVar kind (directed) non-edge `(i,j)`
-#' @templateVar see dnsp
-#' 
-#' @template ergmTerm-sp-to-dsp
-#'
-#' @concept directed
-#' @concept undirected
-InitErgmTerm.nsp<-function(nw, arglist, cache.sp=TRUE, ...) {
-  a <- check.ErgmTerm(nw, arglist,
-                      varnames = c("d"),
-                      vartypes = c("numeric"),
-                      defaultvalues = list(NULL),
-                      required = c(TRUE))
-  d<-a$d
-  if (any(d==0)) {
-    emptynwstats <- rep(0, length(d))
-    if(is.bipartite(nw)){
-      nb1 <- get.network.attribute(nw, "bipartite")
-      nb2 <- network.size(nw) - nb1
-      emptynwstats[d==0] <- nb1*(nb1-1)/2 + nb2*(nb2-1)/2
-    }else{
-      emptynwstats[d==0] <- network.dyadcount(nw,FALSE)
-    }
-  }else{
-    emptynwstats <- NULL
-  }
-  ld<-length(d)
-  if(ld==0){return(NULL)}
-  coef.names <- paste("nsp",d,sep="")
-  if(is.directed(nw)){dname <- "tnsp"}else{dname <- "nsp"}
-
-  if (!is.null(emptynwstats)) {
-    list(name=dname, coef.names=coef.names, inputs=c(d),
-         emptynwstats=emptynwstats, minval=0, auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-  } else {
-    list(name=dname, coef.names=coef.names, inputs=c(d), minval=0, auxiliaries=if(cache.sp) .spcache.aux(if(is.directed(nw)) "OTP" else "UTP") else NULL)
-  }
-}
-
 
 
 #=======================InitErgmTerm functions:  O============================#
